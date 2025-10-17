@@ -25,6 +25,7 @@
 #include "iostats.h"
 #include "amdgpu.h"
 #include "fps_metrics.h"
+#include "fps_socket.h"
 #include "net.h"
 #include "fex.h"
 #include "ftrace.h"
@@ -226,6 +227,7 @@ void stop_hw_updater()
 {
    if (hw_update_thread)
       hw_update_thread.reset();
+   fps_socket_cleanup();
 }
 
 void update_hud_info_with_frametime(struct swapchain_stats& sw_stats, const struct overlay_params& params, uint32_t vendorID, uint64_t frametime_ns){
@@ -258,6 +260,19 @@ void update_hud_info_with_frametime(struct swapchain_stats& sw_stats, const stru
    frametime = frametime_ms;
    fps = double(1000 / frametime_ms);
    if (fpsmetrics) fpsmetrics->update(frametime_ms);
+
+   // FPS socket initialization and broadcasting
+   static bool fps_socket_initialized = false;
+   if (!fps_socket_initialized && real_params->enabled[OVERLAY_PARAM_ENABLED_fps_socket]) {
+      if (fps_socket_init() >= 0) {
+         fps_socket_initialized = true;
+      }
+   }
+   // Broadcast on every frame, but use the smoothed sw_stats.fps value
+   if (fps_socket_initialized) {
+      fps_socket_accept_clients();
+      fps_socket_broadcast_full(sw_stats.fps, frametime_ms);  // Pass live FPS and frametime
+   }
 
    if (elapsed >= real_params->fps_sampling_period) {
       if (!hw_update_thread)
@@ -312,7 +327,8 @@ void update_hud_info_with_frametime(struct swapchain_stats& sw_stats, const stru
 void update_hud_info(struct swapchain_stats& sw_stats, const struct overlay_params& params, uint32_t vendorID){
    uint64_t now = os_time_get_nano(); /* ns */
    uint64_t frametime_ns = now - sw_stats.last_present_time;
-   if (!get_params()->no_display || logger->is_active())
+   if (!get_params()->no_display || logger->is_active() || 
+       get_params()->enabled[OVERLAY_PARAM_ENABLED_fps_socket])
       update_hud_info_with_frametime(sw_stats, params, vendorID, frametime_ns);
 }
 

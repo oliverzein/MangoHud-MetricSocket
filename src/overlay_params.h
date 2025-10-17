@@ -135,6 +135,7 @@ struct Tracepoint;
    OVERLAY_PARAM_BOOL(flip_efficiency)               \
    OVERLAY_PARAM_BOOL(gpu_power_limit)               \
    OVERLAY_PARAM_BOOL(dx_api)                        \
+   OVERLAY_PARAM_BOOL(fps_socket)                    \
    OVERLAY_PARAM_CUSTOM(fps_sampling_period)         \
    OVERLAY_PARAM_CUSTOM(output_folder)               \
    OVERLAY_PARAM_CUSTOM(output_file)                 \

@@ -200,7 +200,9 @@ static void msg_read_thread(){
                 if (msg_size > offsetof(struct mangoapp_msg_v1, visible_frametime_ns)){
                     auto real_params = get_params();
                     bool should_new_frame = false;
-                    if (mangoapp_v1->visible_frametime_ns != ~(0lu) && (!real_params->no_display || logger->is_active())) {
+                    if (mangoapp_v1->visible_frametime_ns != ~(0lu) && 
+                        (!real_params->no_display || logger->is_active() || 
+                         real_params->enabled[OVERLAY_PARAM_ENABLED_fps_socket])) {
                         update_hud_info_with_frametime(sw_stats, params, vendorID, mangoapp_v1->visible_frametime_ns);
                         should_new_frame = true;
                     }
