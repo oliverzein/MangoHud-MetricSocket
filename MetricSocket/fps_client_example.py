@@ -94,6 +94,7 @@ def read_fps_data(sock):
         - gpu_load (int, 4 bytes): GPU usage percentage
         - cpu_temp (int, 4 bytes): CPU temperature (°C)
         - gpu_temp (int, 4 bytes): GPU temperature (°C)
+        - gpu_junction_temp (int, 4 bytes): GPU junction temperature (°C)
         - gpu_core_clock (int, 4 bytes): GPU core clock (MHz)
         - gpu_mem_clock (int, 4 bytes): GPU memory clock (MHz)
         - gpu_power (int, 4 bytes): GPU power consumption (watts)
@@ -114,7 +115,7 @@ def read_fps_data(sock):
     """
     try:
         data = sock.recv(1024)  # Read up to 1024 bytes
-        if len(data) != 84:
+        if len(data) != 88:
             print(f"\nDebug: Received {len(data)} bytes, expected 84 bytes")
             if len(data) == 16:
                 print("Debug: This looks like the old 16-byte format!")
@@ -126,7 +127,7 @@ def read_fps_data(sock):
         # Unpack full metrics packet
         # Format: double, 3 floats, 7 ints, 7 floats, uint64
         # d=double(8), fff=3 floats(12), iiiiiii=7 ints(28), fffffff=7 floats(28), Q=uint64(8) = 84 bytes
-        values = struct.unpack('=dfffiiiiiiifffffffQ', data)
+        values = struct.unpack('=dfffiiiiiiiifffffffQ', data)
         
         return {
             'fps': values[0],
@@ -137,12 +138,13 @@ def read_fps_data(sock):
             'gpu_load': values[5],
             'cpu_temp': values[6],
             'gpu_temp': values[7],
-            'gpu_core_clock': values[8],
-            'gpu_mem_clock': values[9],
-            'gpu_power': values[10],
-            'gpu_vram_used': values[11],
-            'ram_used': values[12],
-            'swap_used': values[13],
+            'gpu_junction_temp': values[8],
+            'gpu_core_clock': values[9],
+            'gpu_mem_clock': values[10],
+            'gpu_power': values[11],
+            'gpu_vram_used': values[12],
+            'ram_used': values[13],
+            'swap_used': values[14],
             'process_rss': values[14],
             'fps_1_percent_low': values[15],
             'fps_0_1_percent_low': values[16],
@@ -196,7 +198,7 @@ def main():
     if verbose:
         # Verbose mode - show all metrics
         print(f"{'FPS':>8} | {'1%Low':>7} | {'0.1%Low':>8} | {'97%':>7} | "
-              f"{'CPU%':>6} | {'CPUTemp':>7} | {'GPU%':>6} | {'GPUTemp':>7} | "
+              f"{'CPU%':>6} | {'CPUTemp':>8} | {'GPU%':>6} | {'GPUTemp':>7} | {'GPUJunc':>7} |"
               f"{'VRAM':>7} | {'RAM':>7}")
         print("-" * 105)
     else:
@@ -216,8 +218,8 @@ def main():
                 print(f"{data['fps']:8.1f} | {data['fps_1_percent_low']:7.1f} | "
                       f"{data['fps_0_1_percent_low']:8.1f} | {data['fps_97_percentile']:7.1f} | "
                       f"{data['cpu_load']:5.1f}% | {data['cpu_temp']:6}°C | "
-                      f"{data['gpu_load']:5}% | {data['gpu_temp']:6}°C | "
-                      f"{data['gpu_vram_used']:6.2f}G | {data['ram_used']:6.2f}G", end='\r')
+                      f"{data['gpu_load']:5}% | {data['gpu_temp']:5}°C | {data['gpu_junction_temp']:5}°C | "
+                      f"{data['gpu_vram_used']:5.2f}G | {data['ram_used']:6.2f}G", end='\r')
             else:
                 # Compact display - essential metrics
                 print(f"{data['fps']:8.1f} | {data['fps_1_percent_low']:8.1f} | "

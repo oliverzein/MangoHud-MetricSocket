@@ -2,17 +2,20 @@
 #include "mesa/util/os_socket.h"
 #include "logging.h"
 #include "fps_metrics.h"
+#include "gpu.h"
 #include <spdlog/spdlog.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #include <errno.h>
 #include <cstring>
 #include <vector>
+#include <unordered_map>
 #include <algorithm>
 #include <chrono>
 
 static int fps_server_socket = -1;
 static std::vector<int> fps_clients;
+static std::unordered_map<int, int> fps_client_fail_count;  // Track consecutive send failures
 
 int fps_socket_init() {
     if (fps_server_socket >= 0) {
@@ -60,6 +63,7 @@ void fps_socket_accept_clients() {
         // Set client socket to non-blocking
         os_socket_block(client, false);
         fps_clients.push_back(client);
+        fps_client_fail_count[client] = 0;  // Initialize failure counter
         SPDLOG_DEBUG("FPS socket: new client connected (fd={}, total={})", 
                      client, fps_clients.size());
     }
@@ -97,6 +101,13 @@ void fps_socket_broadcast_full(double live_fps, float live_frametime) {
     packet.gpu_load = currentLogData.gpu_load;
     packet.cpu_temp = currentLogData.cpu_temp;
     packet.gpu_temp = currentLogData.gpu_temp;
+    
+    // Read junction_temp directly from GPU metrics (not in currentLogData)
+    packet.gpu_junction_temp = -1;  // Default if not available
+    if (gpus && gpus->active_gpu()) {
+        packet.gpu_junction_temp = gpus->active_gpu()->metrics.junction_temp;
+    }
+    
     packet.gpu_core_clock = currentLogData.gpu_core_clock;
     packet.gpu_mem_clock = currentLogData.gpu_mem_clock;
     packet.gpu_power = currentLogData.gpu_power;
@@ -113,24 +124,46 @@ void fps_socket_broadcast_full(double live_fps, float live_frametime) {
     // Broadcast to all clients, removing disconnected ones
     auto it = fps_clients.begin();
     while (it != fps_clients.end()) {
-        ssize_t sent = os_socket_send(*it, &packet, sizeof(packet), MSG_NOSIGNAL);
+        int client_fd = *it;
+        ssize_t sent = os_socket_send(client_fd, &packet, sizeof(packet), MSG_NOSIGNAL);
         
         if (sent < 0) {
-            // Client disconnected or error (but not EAGAIN/EWOULDBLOCK)
-            if (errno != EAGAIN && errno != EWOULDBLOCK) {
-                SPDLOG_DEBUG("FPS socket (full): client disconnected (fd={}, error={})", 
-                             *it, strerror(errno));
-                os_socket_close(*it);
-                it = fps_clients.erase(it);
+            // Check if send failed due to full buffer (stale client)
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                // Buffer full - increment failure counter
+                fps_client_fail_count[client_fd]++;
+                
+                // Disconnect if too many consecutive failures (stale client)
+                if (fps_client_fail_count[client_fd] > 120) {  // ~1 second at 120 FPS
+                    SPDLOG_WARN("FPS socket: disconnecting stale client (fd={}, {} consecutive failures)", 
+                                client_fd, fps_client_fail_count[client_fd]);
+                    os_socket_close(client_fd);
+                    fps_client_fail_count.erase(client_fd);
+                    it = fps_clients.erase(it);
+                    continue;
+                }
+                ++it;
                 continue;
             }
+            
+            // Other error - disconnect immediately
+            SPDLOG_DEBUG("FPS socket (full): client disconnected (fd={}, error={})", 
+                         client_fd, strerror(errno));
+            os_socket_close(client_fd);
+            fps_client_fail_count.erase(client_fd);
+            it = fps_clients.erase(it);
+            continue;
         } else if (sent != sizeof(packet)) {
             // Partial send - close this client
-            SPDLOG_DEBUG("FPS socket (full): partial send, closing client (fd={})", *it);
-            os_socket_close(*it);
+            SPDLOG_DEBUG("FPS socket (full): partial send, closing client (fd={})", client_fd);
+            os_socket_close(client_fd);
+            fps_client_fail_count.erase(client_fd);
             it = fps_clients.erase(it);
             continue;
         }
+        
+        // Success - reset failure counter
+        fps_client_fail_count[client_fd] = 0;
         ++it;
     }
 }
@@ -141,6 +174,7 @@ void fps_socket_cleanup() {
         os_socket_close(client);
     }
     fps_clients.clear();
+    fps_client_fail_count.clear();
     
     // Close server socket
     if (fps_server_socket >= 0) {

@@ -20,7 +20,7 @@ struct fps_data_packet {
 
 /**
  * Full metrics packet structure with all overlay data
- * Total size: 92 bytes (aligned)
+ * Total size: 88 bytes (packed)
  */
 struct fps_metrics_full_packet {
     double fps;              // 8 bytes - current frames per second
@@ -31,6 +31,7 @@ struct fps_metrics_full_packet {
     int gpu_load;            // 4 bytes - GPU usage percentage
     int cpu_temp;            // 4 bytes - CPU temperature (°C)
     int gpu_temp;            // 4 bytes - GPU temperature (°C)
+    int gpu_junction_temp;   // 4 bytes - GPU junction temperature (°C)
     int gpu_core_clock;      // 4 bytes - GPU core clock (MHz)
     int gpu_mem_clock;       // 4 bytes - GPU memory clock (MHz)
     int gpu_power;           // 4 bytes - GPU power consumption (watts)
