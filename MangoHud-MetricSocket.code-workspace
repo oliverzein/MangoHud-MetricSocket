@@ -5,6 +5,12 @@
 		},
 		{
 			"path": "../../Python/turing-smart-screen-python-mangohud"
+		},
+		{
+			"path": "../../Python/MangoApp"
+		},
+		{
+			"path": "../../Python/MangoSocketReader"
 		}
 	],
 	"settings": {}
