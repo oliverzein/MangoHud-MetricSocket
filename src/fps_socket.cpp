@@ -77,9 +77,10 @@ void fps_socket_broadcast_full(double live_fps, float frametime_ms) {
     float fps_1_low = 0.0f;
     float fps_avg = 0.0f;
     
-    if (fpsmetrics && !fpsmetrics->metrics.empty()) {
+    if (fpsmetrics) {
         // Find metrics by name (0.01 = 1%, AVG = average)
-        for (const auto& metric : fpsmetrics->metrics) {
+        auto metrics_copy = fpsmetrics->copy_metrics();
+        for (const auto& metric : metrics_copy) {
             if (metric.name == "0.01") {
                 fps_1_low = metric.value;
             } else if (metric.name == "AVG") {
