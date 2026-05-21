@@ -164,6 +164,10 @@ build() {
 
     if [ "$MACHINE" = "x86_64" ]; then
         DESTDIR="$PWD/build/release" ninja -C build/meson32 install
+        # meson32 overwrites MangoHud.x86_64.json with a lib32 path — restore the
+        # correct lib64 version from the meson64 build.
+        cp "$PWD/build/meson64/src/MangoHud.x86_64.json" \
+           "$PWD/build/release/usr/share/vulkan/implicit_layer.d/MangoHud.x86_64.json"
     fi
 
     sed -i 's:/usr/\\$LIB:/usr/lib/mangohud/\\$LIB:g' "$PWD/build/release/usr/bin/mangohud"
