@@ -24,6 +24,7 @@ struct fps_data_packet {
  */
 struct fps_metrics_full_packet {
     double fps;              // 8 bytes - current frames per second
+    float frametime;         // 4 bytes - current frame time in milliseconds
     float fps_avg;           // 4 bytes - average FPS over time window
     float cpu_load;          // 4 bytes - CPU usage percentage
     float cpu_power;         // 4 bytes - CPU power consumption (watts)
@@ -58,7 +59,7 @@ void fps_socket_accept_clients();
  * 
  * @param live_fps Current frames per second (smoothed)
  */
-void fps_socket_broadcast_full(double live_fps);
+void fps_socket_broadcast_full(double live_fps, float frametime_ms);
 
 /**
  * Close the FPS socket and cleanup all resources.

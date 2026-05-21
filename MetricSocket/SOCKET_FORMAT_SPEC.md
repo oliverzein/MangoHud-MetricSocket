@@ -1,7 +1,7 @@
 # MangoHud FPS Socket - Data Format Specification
 
-**Version**: 1.0 (48-byte format)  
-**Last Updated**: 2025-10-21
+**Version**: 2.0 (52-byte format)  
+**Last Updated**: 2025-10-26
 
 ---
 
@@ -16,37 +16,38 @@
 
 ### Buffer Configuration
 - Uses OS defaults for send/receive buffers
-- Packet size: 48 bytes
+- Packet size: 52 bytes
 
 ---
 
-## Packet Format (48 bytes)
+## Packet Format (52 bytes)
 
 ### Binary Structure
 
-**Struct Format String**: `'=dfffiiiiiff'`
-- `=` : Native byte order, standard alignment
+**Struct Format String**: `'<dffffiiiiiff'`
+- `<` : Little-endian, standard sizes (packed)
 - `d` : double (8 bytes)
 - `f` : float (4 bytes)
 - `i` : int (4 bytes)
 
-**Total**: 48 bytes (packed)
+**Total**: 52 bytes (packed)
 
 ### Field Mapping
 
 | Offset | Type   | Size | Index | Field Name             | Unit/Range      | Description                          |
 |--------|--------|------|-------|------------------------|-----------------|--------------------------------------|
 | 0      | double | 8    | [0]   | fps                    | FPS             | Current frames per second (smoothed) |
-| 8      | float  | 4    | [1]   | fps_avg                | FPS             | Average FPS over time window         |
-| 12     | float  | 4    | [2]   | cpu_load               | 0.0 - 100.0 %   | CPU usage percentage                 |
-| 16     | float  | 4    | [3]   | cpu_power              | watts           | CPU power consumption                |
-| 20     | int    | 4    | [4]   | gpu_load               | 0 - 100 %       | GPU usage percentage                 |
-| 24     | int    | 4    | [5]   | cpu_temp               | °C              | CPU temperature                      |
-| 28     | int    | 4    | [6]   | gpu_temp               | °C              | GPU edge temperature                 |
-| 32     | int    | 4    | [7]   | gpu_junction_temp      | °C              | GPU junction temperature (hotspot)   |
-| 36     | int    | 4    | [8]   | gpu_power              | watts           | GPU power consumption                |
-| 40     | float  | 4    | [9]   | gpu_vram_used          | GiB             | GPU VRAM used                        |
-| 44     | float  | 4    | [10]  | fps_1_percent_low      | FPS             | 1% low FPS (99th percentile)         |
+| 8      | float  | 4    | [1]   | frametime_ms           | ms              | Current frame time (milliseconds)    |
+| 12     | float  | 4    | [2]   | fps_avg                | FPS             | Average FPS over time window         |
+| 16     | float  | 4    | [3]   | cpu_load               | 0.0 - 100.0 %   | CPU usage percentage                 |
+| 20     | float  | 4    | [4]   | cpu_power              | watts           | CPU power consumption                |
+| 24     | int    | 4    | [5]   | gpu_load               | 0 - 100 %       | GPU usage percentage                 |
+| 28     | int    | 4    | [6]   | cpu_temp               | °C              | CPU temperature                      |
+| 32     | int    | 4    | [7]   | gpu_temp               | °C              | GPU edge temperature                 |
+| 36     | int    | 4    | [8]   | gpu_junction_temp      | °C              | GPU junction temperature (hotspot)   |
+| 40     | int    | 4    | [9]   | gpu_power              | watts           | GPU power consumption                |
+| 44     | float  | 4    | [10]  | gpu_vram_used          | GiB             | GPU VRAM used                        |
+| 48     | float  | 4    | [11]  | fps_1_percent_low      | FPS             | 1% low FPS (99th percentile)         |
 
 ---
 
@@ -57,7 +58,7 @@
 
 ### Key Functions
 
-#### `fps_socket_broadcast_full(double live_fps)`
+#### `fps_socket_broadcast_full(double live_fps, float frametime_ms)`
 Broadcasts full metrics packet to all connected clients.
 
 **Behavior**:
@@ -111,8 +112,8 @@ if (fps_client_fail_count[client_fd] > 120) {
 latest_data = None
 while True:
     try:
-        data = self.sock.recv(48)  # Non-blocking, exact packet size
-        if len(data) == 48:
+        data = self.sock.recv(52)  # Non-blocking, exact packet size
+        if len(data) == 52:
             latest_data = data  # Overwrite with newest
     except BlockingIOError:
         break  # Buffer empty, done
@@ -129,20 +130,21 @@ while True:
 import struct
 
 # Unpack 48-byte packet
-values = struct.unpack('=dfffiiiiiff', data)
+values = struct.unpack('<dffffiiiiiff', data)
 
 # Extract fields
 fps = values[0]
-fps_avg = values[1]
-cpu_load = values[2]
-cpu_power = values[3]
-gpu_load = values[4]
-cpu_temp = values[5]
-gpu_temp = values[6]
-gpu_junction_temp = values[7]
-gpu_power = values[8]
-gpu_vram_used = values[9]
-one_percent_low = values[10]
+frametime_ms = values[1]
+fps_avg = values[2]
+cpu_load = values[3]
+cpu_power = values[4]
+gpu_load = values[5]
+cpu_temp = values[6]
+gpu_temp = values[7]
+gpu_junction_temp = values[8]
+gpu_power = values[9]
+gpu_vram_used = values[10]
+one_percent_low = values[11]
 ```
 
 ### Error Handling
@@ -167,7 +169,7 @@ except struct.error:
 
 ## Version Notes
 
-- Current packet is 48 bytes, fixed-size, packed, native endianness.
+- Current packet is 52 bytes, fixed-size, little-endian.
 - Any change in fields or sizes is a breaking change; clients must match server packet size exactly.
 
 ---

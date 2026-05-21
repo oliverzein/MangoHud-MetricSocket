@@ -11,6 +11,9 @@
 		},
 		{
 			"path": "../../Python/MangoSocketReader"
+		},
+		{
+			"path": "../../../../../../../etc/udev"
 		}
 	],
 	"settings": {}

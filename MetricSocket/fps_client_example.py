@@ -34,19 +34,20 @@ def find_mangohud_socket() -> Optional[int]:
     Returns the PID of the first MangoHud game found, or None.
     """
     try:
+        pids = []
         with open('/proc/net/unix', 'r') as f:
             for line in f:
                 if 'mangohud-fps-' in line:
-                    # Extract PID from socket name
-                    # Line format: "... @mangohud-fps-<pid> ..."
                     parts = line.split('mangohud-fps-')
                     if len(parts) > 1:
-                        # Get the PID (first token after the prefix)
                         pid_str = parts[1].strip().split()[0]
                         try:
-                            return int(pid_str)
+                            pids.append(int(pid_str))
                         except ValueError:
                             continue
+        if pids:
+            # Prefer the highest PID (most recent process)
+            return max(pids)
     except (FileNotFoundError, PermissionError):
         pass
     return None
@@ -79,6 +80,22 @@ def connect_fps_socket(pid):
         print("  2. fps_socket=1 is set in MangoHud config")
         print("  3. The PID is correct")
         raise
+
+
+PACKET_FMT = '<dffffiiiiiff'  # little-endian packed
+PACKET_SIZE = struct.calcsize(PACKET_FMT)
+
+
+def _values_look_sane(vals):
+    fps, ft, fps_avg = vals[0], vals[1], vals[2]
+    # Basic sanity for alignment/protocol
+    if not (0.0 <= fps < 20000.0):
+        return False
+    if not (0.0 <= ft < 1000.0):  # ms
+        return False
+    if not (0.0 <= fps_avg < 20000.0):
+        return False
+    return True
 
 
 def read_fps_data(sock):
@@ -114,41 +131,76 @@ def read_fps_data(sock):
         Dictionary with all metrics or None on error
     """
     try:
-        # Read exactly 48 bytes (one packet)
-        expected = 48
-        chunks = bytearray()
-        while len(chunks) < expected:
-            chunk = sock.recv(expected - len(chunks))
+        # Persistent buffer on the function
+        if not hasattr(read_fps_data, '_buf'):
+            read_fps_data._buf = bytearray()
+            read_fps_data._aligned = False
+
+        buf = read_fps_data._buf
+        # Fill buffer until we can parse at least one packet
+        while len(buf) < PACKET_SIZE:
+            chunk = sock.recv(4096)
             if not chunk:
                 return None
-            chunks.extend(chunk)
-        data = bytes(chunks)
+            buf.extend(chunk)
 
-        if len(data) != 48:
-            print(f"\nDebug: Received {len(data)} bytes, expected 48 bytes")
-            if len(data) == 16:
-                print("Debug: This looks like the old 16-byte format!")
-                print("Debug: Make sure you restarted the game after rebuilding MangoHud")
-            elif len(data) > 0:
-                print(f"Debug: First few bytes: {data[:min(20, len(data))].hex()}")
+        # If not aligned yet, try to find alignment by scanning
+        if not read_fps_data._aligned:
+            resynced = False
+            while len(buf) >= PACKET_SIZE:
+                try:
+                    vals = struct.unpack(PACKET_FMT, buf[:PACKET_SIZE])
+                except struct.error:
+                    vals = None
+                if vals and _values_look_sane(vals):
+                    read_fps_data._aligned = True
+                    if resynced:
+                        print("\nInfo: Stream resynchronized to packet boundary.")
+                    break
+                # drop one byte and continue scanning
+                buf.pop(0)
+                resynced = True
+                # Top-up if needed
+                if len(buf) < PACKET_SIZE:
+                    chunk = sock.recv(4096)
+                    if not chunk:
+                        return None
+                    buf.extend(chunk)
+
+        # At this point we should be aligned; if not, give up
+        if not read_fps_data._aligned:
             return None
 
-        # Unpack full metrics packet (48 bytes)
-        # Format: double, 3 floats, 5 ints, 2 floats
-        values = struct.unpack('=dfffiiiiiff', data)
+        # Ensure we have one full packet
+        while len(buf) < PACKET_SIZE:
+            chunk = sock.recv(4096)
+            if not chunk:
+                return None
+            buf.extend(chunk)
+
+        data = bytes(buf[:PACKET_SIZE])
+        del buf[:PACKET_SIZE]
+
+        # Unpack full metrics packet (52 bytes)
+        values = struct.unpack(PACKET_FMT, data)
+        if not _values_look_sane(values):
+            # Lose alignment and try again next call
+            read_fps_data._aligned = False
+            return None
 
         return {
             'fps': values[0],
-            'fps_avg': values[1],
-            'cpu_load': values[2],
-            'cpu_power': values[3],
-            'gpu_load': values[4],
-            'cpu_temp': values[5],
-            'gpu_temp': values[6],
-            'gpu_junction_temp': values[7],
-            'gpu_power': values[8],
-            'gpu_vram_used': values[9],
-            'fps_1_percent_low': values[10],
+            'frametime_ms': values[1],
+            'fps_avg': values[2],
+            'cpu_load': values[3],
+            'cpu_power': values[4],
+            'gpu_load': values[5],
+            'cpu_temp': values[6],
+            'gpu_temp': values[7],
+            'gpu_junction_temp': values[8],
+            'gpu_power': values[9],
+            'gpu_vram_used': values[10],
+            'fps_1_percent_low': values[11],
         }
     except socket.error:
         return None
@@ -196,14 +248,14 @@ def main():
     
     if verbose:
         # Verbose mode - show available metrics
-        print(f"{'FPS':>8} | {'1%Low':>7} | "
+        print(f"{'FPS':>8} | {'FT(ms)':>7} | {'1%Low':>7} | "
               f"{'CPU%':>6} | {'CPUTemp':>8} | {'GPU%':>6} | {'GPUTemp':>7} | {'GPUJunc':>7} |"
               f"{'VRAM':>7}")
-        print("-" * 88)
+        print("-" * 98)
     else:
         # Compact mode - essential metrics only
-        print(f"{'FPS':>8} | {'1% Low':>8} | {'CPU':>8} | {'GPU':>8} | {'CPU Temp':>8} | {'GPU Temp':>8}")
-        print("-" * 74)
+        print(f"{'FPS':>8} | {'FT ms':>7} | {'1% Low':>8} | {'CPU':>8} | {'GPU':>8} | {'CPU Temp':>8} | {'GPU Temp':>8}")
+        print("-" * 84)
     
     try:
         while True:
@@ -214,13 +266,13 @@ def main():
             
             if verbose:
                 # Verbose display - available metrics
-                print(f"{data['fps']:8.1f} | {data['fps_1_percent_low']:7.1f} | "
+                print(f"{data['fps']:8.1f} | {data['frametime_ms']:7.3f} | {data['fps_1_percent_low']:7.1f} | "
                       f"{data['cpu_load']:5.1f}% | {data['cpu_temp']:6}°C | "
                       f"{data['gpu_load']:5}% | {data['gpu_temp']:5}°C | {data['gpu_junction_temp']:5}°C | "
                       f"{data['gpu_vram_used']:5.2f}G", end='\r')
             else:
                 # Compact display - essential metrics
-                print(f"{data['fps']:8.1f} | {data['fps_1_percent_low']:8.1f} | "
+                print(f"{data['fps']:8.1f} | {data['frametime_ms']:7.3f} | {data['fps_1_percent_low']:8.1f} | "
                       f"{data['cpu_load']:7.1f}% | {data['gpu_load']:7}% | "
                       f"{data['cpu_temp']:7}°C | {data['gpu_temp']:7}°C", end='\r')
             

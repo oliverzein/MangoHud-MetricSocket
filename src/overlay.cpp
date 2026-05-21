@@ -271,7 +271,7 @@ void update_hud_info_with_frametime(struct swapchain_stats& sw_stats, const stru
    // Broadcast on every frame, but use the smoothed sw_stats.fps value
    if (fps_socket_initialized) {
       fps_socket_accept_clients();
-      fps_socket_broadcast_full(sw_stats.fps);  // Pass live FPS
+      fps_socket_broadcast_full(sw_stats.fps, frametime_ms);  // Pass live FPS and frametime
    }
 
    if (elapsed >= real_params->fps_sampling_period) {

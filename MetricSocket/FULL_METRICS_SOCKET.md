@@ -10,7 +10,7 @@ This implementation extends MangoHud's FPS socket to broadcast essential overlay
 ✅ **Percentile FPS metric** - 1% low  
 ✅ **Works when overlay hidden** - Metrics continue updating  
 ✅ **Zero file I/O** - No disk writes, pure socket broadcasting  
-✅ **Fixed-size binary** - Single 48-byte packet  
+✅ **Fixed-size binary** - Single 52-byte packet  
 ✅ **Minimal invasive** - No changes to `logData` struct  
 ✅ **Non-blocking** - ~0.3% CPU overhead at 120 FPS  
 
@@ -23,6 +23,7 @@ This implementation extends MangoHud's FPS socket to broadcast essential overlay
 ```cpp
 struct fps_metrics_full_packet {
     double fps;              // 8 bytes
+    float frametime;         // 4 bytes (ms)
     float fps_avg;           // 4 bytes
     float cpu_load;          // 4 bytes
     float cpu_power;         // 4 bytes
@@ -34,13 +35,13 @@ struct fps_metrics_full_packet {
     float gpu_vram_used;     // 4 bytes
     float fps_1_percent_low; // 4 bytes
 } __attribute__((packed));
-// Total: 48 bytes
+// Total: 52 bytes
 ```
 
 #### 2. **fps_socket.cpp** - Implemented Broadcast Function
 
 ```cpp
-void fps_socket_broadcast_full(double live_fps) {
+void fps_socket_broadcast_full(double live_fps, float frametime_ms) {
     // Query percentile metrics from fpsMetrics
     float fps_1_low = 0.0f;
     float fps_avg = 0.0f;
@@ -48,7 +49,8 @@ void fps_socket_broadcast_full(double live_fps) {
 
     // Pack live FPS + currentLogData + percentile metrics
     struct fps_metrics_full_packet packet;
-    packet.fps = live_fps;  // Use live FPS from sw_stats.fps
+    packet.fps = live_fps;              // Use live FPS from sw_stats.fps
+    packet.frametime = frametime_ms;    // Current frame time (ms)
     packet.fps_avg = fps_avg;
     packet.cpu_load = currentLogData.cpu_load;
     // ... populate remaining fields from currentLogData and GPU metrics ...
@@ -65,7 +67,7 @@ void fps_socket_broadcast_full(double live_fps) {
 // Broadcast on every frame, using smoothed sw_stats.fps value
 if (fps_socket_initialized) {
     fps_socket_accept_clients();
-    fps_socket_broadcast_full(sw_stats.fps);  // Pass live FPS
+    fps_socket_broadcast_full(sw_stats.fps, frametime_ms);  // Pass FPS and frametime
 }
 ```
 
@@ -102,10 +104,10 @@ fps_metrics=0.01  # 1st percentile
 ### Socket Details
 
 - **Socket path**: `@mangohud-fps-<pid>` (abstract namespace)
-- **Packet format**: 48 bytes (essential metrics + 1% low)
+- **Packet format**: 52 bytes (adds frametime_ms as second field)
 - **Broadcast frequency**: Every frame (~120 Hz)
 - **Percentile update**: Every 500ms (via fpsMetrics background thread)
-- **Bandwidth**: ~6 KB/sec per client at 120 FPS (48 bytes/packet)
+- **Bandwidth**: ~6.2 KB/sec per client at 120 FPS (52 bytes/packet)
 
 ## Python Client Example
 
@@ -118,31 +120,32 @@ pid = 12345  # Game PID
 sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 sock.connect(f"\0mangohud-fps-{pid}")
 
-# Full metrics packet format (48 bytes)
-# Format: double, 3 floats, 5 ints, 2 floats
-FULL_FORMAT = '=dfffiiiiiff'
+# Full metrics packet format (52 bytes, little-endian)
+# Layout: double, 4 floats, 5 ints, 2 floats
+FULL_FORMAT = '<dffffiiiiiff'
 
 while True:
-    data = sock.recv(48)
-    if len(data) != 48:
+    data = sock.recv(52)
+    if len(data) != 52:
         continue
     
     # Unpack full metrics packet
     values = struct.unpack(FULL_FORMAT, data)
     
     fps = values[0]
-    fps_avg = values[1]
-    cpu_load = values[2]
-    cpu_temp = values[5]
-    gpu_load = values[4]
-    gpu_temp = values[6]
-    fps_1_low = values[10]
+    frametime_ms = values[1]
+    fps_avg = values[2]
+    cpu_load = values[3]
+    cpu_temp = values[6]
+    gpu_load = values[5]
+    gpu_temp = values[7]
+    fps_1_low = values[11]
     
-    print(f"FPS: {fps:.1f} | 1% Low: {fps_1_low:.1f}")
+    print(f"FPS: {fps:.1f} | FT: {frametime_ms:.3f} ms | 1% Low: {fps_1_low:.1f}")
     print(f"CPU: {cpu_load:.1f}% @ {cpu_temp}°C | GPU: {gpu_load}% @ {gpu_temp}°C")
 ```
 
-**Complete example:** See `fps_client_example.py` for a full-featured client with auto-discovery, reconnection, and verbose mode. Note: The example client must unpack using `'=dffffiiiiif'` and read exactly 48 bytes per packet.
+**Complete example:** See `fps_client_example.py` for a full-featured client with auto-discovery, reconnection, and verbose mode. Note: The example client must unpack using `'<dffffiiiiiff'` and read exactly 52 bytes per packet.
 
 ## Performance Impact
 
@@ -151,7 +154,7 @@ while True:
 | Keep metrics active | ~0.1% CPU | Every frame |
 | Query fpsMetrics | ~0.001 ms | Every frame |
 | Pack struct | ~0.001 ms | Every frame |
-| Socket send (48 bytes) | ~1–2 µs | Every frame |
+| Socket send (52 bytes) | ~1–2 µs | Every frame |
 | **Total @ 120 FPS** | **~0.3% CPU** | **120 Hz** |
 
 **Result**: Negligible performance impact, no file I/O overhead!
@@ -171,7 +174,7 @@ while True:
 
 ## Format Notes
 
-- Current server sends a 48-byte fixed-size packet. Any change is a breaking change for clients.
+- Current server sends a 52-byte fixed-size packet. Any change is a breaking change for clients.
 
 ## Design Decisions
 

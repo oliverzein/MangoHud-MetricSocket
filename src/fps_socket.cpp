@@ -40,7 +40,7 @@ int fps_socket_init() {
     // Set non-blocking mode to prevent performance impact
     os_socket_block(fps_server_socket, false);
     
-    SPDLOG_INFO("FPS socket v0.1 initialized at @{}", socket_path);
+    SPDLOG_INFO("FPS socket v0.2 initialized at @{}", socket_path);
     return fps_server_socket;
 }
 
@@ -69,7 +69,7 @@ void fps_socket_accept_clients() {
     }
 }
 
-void fps_socket_broadcast_full(double live_fps) {
+void fps_socket_broadcast_full(double live_fps, float frametime_ms) {
     // Early exit if no socket or no clients
     if (fps_server_socket < 0 || fps_clients.empty()) return;
     
@@ -91,6 +91,7 @@ void fps_socket_broadcast_full(double live_fps) {
     // Prepare full metrics packet
     struct fps_metrics_full_packet packet;
     packet.fps = live_fps;
+    packet.frametime = frametime_ms;
     packet.fps_avg = fps_avg;
     packet.cpu_load = currentLogData.cpu_load;
     packet.cpu_power = currentLogData.cpu_power;
