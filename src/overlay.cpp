@@ -262,10 +262,18 @@ void update_hud_info_with_frametime(struct swapchain_stats& sw_stats, const stru
    if (fpsmetrics) fpsmetrics->update(frametime_ms);
 
    // FPS socket initialization and broadcasting
+   // fps_socket_initialized: true  = this instance owns the socket and broadcasts
+   //                          false = not yet attempted or failed with a retriable error
+   // fps_socket_deferred:     true  = another layer instance owns the socket; stop retrying
    static bool fps_socket_initialized = false;
-   if (!fps_socket_initialized && real_params->enabled[OVERLAY_PARAM_ENABLED_fps_socket]) {
-      if (fps_socket_init() >= 0) {
+   static bool fps_socket_deferred = false;
+   if (!fps_socket_initialized && !fps_socket_deferred &&
+       real_params->enabled[OVERLAY_PARAM_ENABLED_fps_socket]) {
+      int rc = fps_socket_init();
+      if (rc >= 0) {
          fps_socket_initialized = true;
+      } else if (rc == -2) {
+         fps_socket_deferred = true;  // Already owned by another instance, stop retrying
       }
    }
    // Broadcast on every frame, but use the smoothed sw_stats.fps value

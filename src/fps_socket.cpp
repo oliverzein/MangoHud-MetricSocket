@@ -33,6 +33,13 @@ int fps_socket_init() {
     fps_server_socket = os_socket_listen_abstract(socket_path, 5);
     
     if (fps_server_socket < 0) {
+        if (errno == EADDRINUSE) {
+            // Another instance of the layer (e.g. second Vulkan context) already
+            // owns the socket for this PID — silently ignore, return -2 so the
+            // caller knows to stop retrying.
+            SPDLOG_DEBUG("FPS socket already bound by another layer instance, skipping");
+            return -2;
+        }
         SPDLOG_ERROR("Failed to create FPS socket: {}", strerror(errno));
         return -1;
     }
