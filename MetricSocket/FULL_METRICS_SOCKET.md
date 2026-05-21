@@ -208,42 +208,128 @@ while True:
 
 ## Testing
 
-### 1. Enable FPS Socket
+### Build
+
 ```bash
+ninja -C build
+```
+
+The build system is meson/ninja. The first run reconfigures automatically if the meson
+version changed. After source edits, `touch src/fps_socket.cpp` may be needed to force
+recompilation if ninja considers the object up to date due to ccache.
+
+### Running with the Custom Build (no install required)
+
+The system `mangohud` launcher hardcodes the shim path and ignores `MANGOHUD_LIBDIR`.
+To test without installing, preload the built shim directly — it uses `${ORIGIN}` to
+find `libMangoHud.so` next to itself in `build/src/`:
+
+```bash
+# Enable fps_socket in config first (once)
 echo "fps_socket=1" >> ~/.config/MangoHud/MangoHud.conf
+
+# Launch any OpenGL or Vulkan app with the built library
+MANGOHUD=1 LD_PRELOAD=/path/to/build/src/libMangoHud_shim.so glxgears
 ```
 
-### 2. Run Game with MangoHud
+Confirm socket is live — look for this log line:
+```
+[MANGOHUD] [info] [fps_socket.cpp:43] FPS socket v0.2 initialized at @mangohud-fps-<pid>
+```
+
+### Quick Socket Test
+
 ```bash
-mangohud ./your_game
+python3 MetricSocket/quick-socket-test.py
 ```
 
-### 3. Test with Python Client
+Auto-discovers the socket from `/proc/net/unix`, reads one 52-byte packet, and prints
+the raw tuple plus interpreted fields. Useful for verifying packet layout and alignment.
+
+### Full Client
+
 ```bash
-python3 fps_client_example.py  # example client using '=dffffiiiiif'
-python3 fps_client_example.py --verbose
+python3 MetricSocket/fps_client_example.py           # compact, auto-discover PID
+python3 MetricSocket/fps_client_example.py --verbose # all fields, live updating
+python3 MetricSocket/fps_client_example.py <pid>     # connect to specific PID
 ```
 
-### 4. Verify Metrics
-- Check that metrics update even when overlay is hidden (toggle with F12)
-- Verify 1% low and 0.1% low values appear (updated every 500ms)
-- Confirm CPU/GPU temps and loads are present
-- Test auto-discovery: client should find the socket automatically
+The client uses `\r` to overwrite the data line in place — output only appears after
+the header row when data starts flowing.
+
+### Inline Python One-liner (no client script needed)
+
+```bash
+python3 -c "
+import socket, struct, time
+
+FMT = '<dffffiiiiiff'
+SIZE = struct.calcsize(FMT)  # 52 bytes
+
+def find_pid():
+    with open('/proc/net/unix') as f:
+        for line in f:
+            if 'mangohud-fps-' in line:
+                return int(line.split('mangohud-fps-')[1].strip().split()[0])
+    return None
+
+pid = find_pid()
+print(f'PID: {pid}, PACKET_SIZE: {SIZE}')
+addr = b'\x00' + f'mangohud-fps-{pid}'.encode()
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.connect(addr)
+s.settimeout(3.0)
+
+for i in range(5):
+    buf = bytearray()
+    while len(buf) < SIZE:
+        buf.extend(s.recv(SIZE - len(buf)))
+    fps, ft, avg, cpu_load, cpu_pow, gpu_load, cpu_t, gpu_t, gpu_junc, gpu_pow, vram, fps_1low = struct.unpack(FMT, bytes(buf))
+    print(f'FPS={fps:.1f} FT={ft:.3f}ms AVG={avg:.1f} CPU={cpu_load:.1f}%@{cpu_t}C GPU={gpu_load}%@{gpu_t}C Junc={gpu_junc}C VRAM={vram:.2f}G 1%Low={fps_1low:.1f}')
+    time.sleep(0.5)
+s.close()
+"
+```
+
+Expected output:
+```
+PID: 94333, PACKET_SIZE: 52
+FPS=2226.9 FT=0.175ms AVG=0.0 CPU=34.6%@68C GPU=77%@51C Junc=58C VRAM=15.44G 1%Low=0.0
+```
+
+### Enabling Percentile Metrics (AVG and 1% Low)
+
+`AVG` and `fps_1_percent_low` are `0.0` unless `fps_metrics` is configured:
+
+```ini
+# ~/.config/MangoHud/MangoHud.conf
+fps_socket=1
+fps_metrics=0.01,AVG
+```
+
+The percentile thread updates every 500 ms; values appear after the first calculation cycle.
+
+### Verify Metrics
+
+- Check metrics update even when overlay is hidden (toggle with F12)
+- Verify 1% low and AVG appear after adding `fps_metrics=0.01,AVG`
+- Confirm CPU/GPU temps and loads are non-zero
+- Test auto-discovery: client finds socket without specifying PID
 
 ### Testing Checklist
 
 - [x] Build succeeds without errors
-- [x] Game launches with MangoHud
-- [x] Socket is created when `fps_socket=1`
-- [x] Python client connects and receives data
+- [x] Socket created when `fps_socket=1` (`FPS socket v0.2 initialized` in log)
+- [x] Python client connects and receives 52-byte packets
+- [x] FPS, frametime, CPU/GPU load, temps, VRAM all non-zero
 - [x] Multiple clients can connect simultaneously
 - [x] Clients disconnect cleanly
 - [x] No performance impact on game (~0.3% CPU overhead)
 - [x] Socket cleanup on game exit
+- [x] Works with OpenGL apps (tested: glxgears)
 - [x] Works with Vulkan games
-- [x] Works with OpenGL games
 - [x] Metrics update when overlay is hidden
-- [x] 1% low FPS values are accurate
+- [ ] 1% low / AVG non-zero (requires `fps_metrics=0.01,AVG` in config)
 
 ## Future Enhancements
 
